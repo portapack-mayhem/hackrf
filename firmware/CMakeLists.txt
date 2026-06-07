@@ -59,5 +59,4 @@ if(CHECK_INCLUDES)
 	include(include-what-you-use.cmake)
 endif()
 
-add_subdirectory(blinky)
 add_subdirectory(hackrf_usb)
