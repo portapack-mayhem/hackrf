@@ -133,9 +133,8 @@ static bool fpga_image_load_from_spifi(unsigned int index)
 
 	// Initialize SSP1 for iCE40 programming
 	ice40_spi_target_init(&ice40);
-	ssp1_set_mode_ice40();
 
-	delay_us_at_mhz(2000, 204);
+	delay_us(2000);
 
 	// Calculate start address of bitstream in flash
 	uint32_t bitstream_addr = FPGA_BITSTREAM_FLASH_ADDR + bitstream_offset;
@@ -149,8 +148,6 @@ static bool fpga_image_load_from_spifi(unsigned int index)
 		spifi_out_buffer,
 		fpga_image_read_block_cb_spifi,
 		&fpga_image_ctx);
-
-	ssp1_set_mode_max283x();
 
 	return success;
 }
