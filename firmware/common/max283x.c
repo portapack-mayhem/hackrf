@@ -26,10 +26,11 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <libopencm3/lpc43xx/ssp.h>
+
 #include "fixed_point.h"
 #include "platform_detect.h"
 #include "platform_gpio.h"
-#include "spi_bus.h"
 
 #ifdef IS_PRALINE
 	#include "max2831_target.h"
@@ -56,14 +57,10 @@ ssp_config_t ssp_config_max283x = {
 
 max283x_driver_t max283x = {};
 
-void ssp1_set_mode_max283x(void)
-{
-	spi_bus_start(&spi_bus_ssp1, &ssp_config_max283x);
-}
-
 #ifdef IS_PRALINE
 max2831_driver_t max2831 = {
 	.bus = &spi_bus_ssp1,
+	.config = &ssp_config_max283x,
 	.target_init = max2831_target_init,
 	.set_mode = max2831_target_set_mode,
 };
@@ -72,6 +69,7 @@ max2831_driver_t max2831 = {
 #ifdef IS_NOT_PRALINE
 max2837_driver_t max2837 = {
 	.bus = &spi_bus_ssp1,
+	.config = &ssp_config_max283x,
 	.target_init = max2837_target_init,
 	.set_mode = max2837_target_set_mode,
 };
@@ -80,6 +78,7 @@ max2837_driver_t max2837 = {
 #ifdef IS_HACKRF_ONE
 max2839_driver_t max2839 = {
 	.bus = &spi_bus_ssp1,
+	.config = &ssp_config_max283x,
 	.target_init = max2839_target_init,
 	.set_mode = max2839_target_set_mode,
 };
@@ -91,8 +90,10 @@ void max283x_setup(max283x_driver_t* const drv)
 	const platform_gpio_t* gpio = platform_gpio();
 
 	/* MAX283x GPIO PinMux */
+	ssp_config_max283x.gpio_select = gpio->max283x_select;
 #ifdef IS_PRALINE
 	if (IS_PRALINE) {
+		ssp_config_max283x.data_bits = SSP_DATA_9BITS;
 		drv->type = MAX2831_VARIANT;
 		max2831.gpio_enable = gpio->max283x_enable;
 		max2831.gpio_rxtx = gpio->max283x_rx_enable;
@@ -104,6 +105,7 @@ void max283x_setup(max283x_driver_t* const drv)
 #endif
 #ifdef IS_NOT_PRALINE
 	if (IS_NOT_PRALINE) {
+		ssp_config_max283x.data_bits = SSP_DATA_16BITS;
 	#ifdef IS_H1_R9
 		if (IS_H1_R9) {
 			drv->type = MAX2839_VARIANT;

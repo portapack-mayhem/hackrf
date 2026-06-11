@@ -71,10 +71,8 @@ bool fpga_spi_selftest(void)
 	// Test writing a register and reading it back.
 	uint8_t reg = 6;
 	uint8_t write_value = 0xA5;
-	ssp1_set_mode_ice40();
 	ice40_spi_write(&ice40, reg, write_value);
 	uint8_t read_value = ice40_spi_read(&ice40, reg);
-	ssp1_set_mode_max283x();
 
 	// Update selftest result.
 	selftest.fpga_spi = (read_value == write_value) ? PASSED : FAILED;
@@ -200,7 +198,7 @@ bool fpga_if_xcvr_selftest(void)
 
 	// Capture 1: 4 Msps, tone at 0.5 MHz, narrowband filter OFF
 	sample_rate_set(SR_FP_MHZ(4), true);
-	delay_us_at_mhz(1000, 204);
+	delay_ms(1);
 	if (rx_samples(num_samples, 2000000) == -1) {
 		timeout = true;
 	}
@@ -211,7 +209,7 @@ bool fpga_if_xcvr_selftest(void)
 
 	// Capture 2: 4 Msps, tone at 0.5 MHz, narrowband filter ON
 	narrowband_filter_set(1);
-	delay_us_at_mhz(1000, 204);
+	delay_ms(1);
 	if (rx_samples(num_samples, 2000000) == -1) {
 		timeout = true;
 	}
@@ -224,7 +222,7 @@ bool fpga_if_xcvr_selftest(void)
 	fpga_set_tx_nco_pstep(&fpga, 255);
 	sample_rate_set(SR_FP_MHZ(20), true);
 	narrowband_filter_set(0);
-	delay_us_at_mhz(1000, 204);
+	delay_ms(1);
 	if (rx_samples(num_samples, 2000000) == -1) {
 		timeout = true;
 	}
@@ -235,7 +233,7 @@ bool fpga_if_xcvr_selftest(void)
 
 	// Capture 4: 20 Msps, tone at 5 MHz, narrowband filter ON
 	narrowband_filter_set(1);
-	delay_us_at_mhz(1000, 204);
+	delay_ms(1);
 	if (rx_samples(num_samples, 2000000) == -1) {
 		timeout = true;
 	}

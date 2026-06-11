@@ -35,12 +35,6 @@
 uint16_t screen_width = 240;
 uint16_t screen_height = 320;
 
-static void portapack_sleep_milliseconds(const uint32_t milliseconds)
-{
-	/* NOTE: Naively assumes 204 MHz instruction cycle clock and five instructions per count */
-	delay(milliseconds * 40800);
-}
-
 typedef struct {
 	gpio_t gpio_dir;
 	gpio_t gpio_lcd_rdx;
@@ -248,7 +242,7 @@ static void portapack_lcd_sleep_out(void)
 	// "It will be necessary to wait 120msec after sending Sleep Out
 	// command (when in Sleep In Mode) before Sleep In command can be
 	// sent."
-	portapack_sleep_milliseconds(120);
+	delay_ms(120);
 }
 
 static void portapack_lcd_display_on(void)
@@ -314,11 +308,11 @@ static void portapack_lcd_wake(void)
 static void portapack_lcd_reset(void)
 {
 	portapack_lcd_reset_state(false);
-	portapack_sleep_milliseconds(1);
+	delay_ms(1);
 	portapack_lcd_reset_state(true);
-	portapack_sleep_milliseconds(10);
+	delay_ms(10);
 	portapack_lcd_reset_state(false);
-	portapack_sleep_milliseconds(120);
+	delay_ms(120);
 }
 
 static uint32_t portapack_data_read(void)
@@ -334,13 +328,13 @@ static uint32_t portapack_lcd_read_2byte(void)
 	portapack_lcd_rd_assert();
 	/* Wait for passthrough data(15:8) to settle -- ~16ns (3 cycles) typical */
 	/* Wait for read control L duration (355ns) */
-	delay(0.355 * 40800); // 355ns
+	delay_us(355);
 	const uint32_t value_high = portapack_data_read();
 	/* Latch data[7:0] */
 	portapack_lcd_rd_deassert();
 	/* Wait for latched data[7:0] to settle -- ~26ns (5 cycles) typical */
 	/* Wait for read control H duration (90ns) */
-	delay(0.090 * 40800); // 90ns
+	delay_us(90);
 	const uint32_t value_low = portapack_data_read();
 	return (value_high << 8) | value_low;
 }
@@ -467,10 +461,10 @@ static void portapack_lcd_init(void)
 			0); // Display Inversion On
 
 		portapack_lcd_data_write_command_and_data(0x11, 0, 0); // Sleep Out
-		delay(0.12 * 40800);                                   // Delay 120ms
+		delay_us(120);
 
 		portapack_lcd_data_write_command_and_data(0x29, 0, 0); // Display On
-		delay(0.05 * 40800);                                   // Delay 50ms
+		delay_us(50);
 
 		// Turn on Tearing Effect Line (TE) output signal.
 		portapack_lcd_data_write_command_and_data(

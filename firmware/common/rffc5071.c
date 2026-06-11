@@ -163,13 +163,13 @@ void rffc5071_lock_test(rffc5071_driver_t* const drv)
 		rffc5071_enable(drv);
 
 		// Wait 1ms.
-		delay_us_at_mhz(1000, 204);
+		delay_ms(1);
 
 		// Check for lock.
 		lock = rffc5071_check_lock(drv);
 
 		rffc5071_disable(drv);
-		delay_us_at_mhz(100, 204);
+		delay_us(100);
 
 		selftest.mixer_locks[i] = lock;
 	}
@@ -202,7 +202,7 @@ static uint16_t rffc5071_spi_read(rffc5071_driver_t* const drv, uint8_t r)
 	(void) drv;
 
 	uint16_t data[] = {0x80 | (r & 0x7f), 0xffff};
-	spi_bus_transfer(drv->bus, data, 2);
+	spi_bus_transfer(drv->bus, drv->bus->config, data, 2);
 	return data[1];
 }
 
@@ -211,7 +211,7 @@ static void rffc5071_spi_write(rffc5071_driver_t* const drv, uint8_t r, uint16_t
 	(void) drv;
 
 	uint16_t data[] = {0x00 | (r & 0x7f), v};
-	spi_bus_transfer(drv->bus, data, 2);
+	spi_bus_transfer(drv->bus, drv->bus->config, data, 2);
 }
 
 uint16_t rffc5071_reg_read(rffc5071_driver_t* const drv, uint8_t r)

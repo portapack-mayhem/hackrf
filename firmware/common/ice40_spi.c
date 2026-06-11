@@ -26,6 +26,7 @@
 #include <libopencm3/lpc43xx/ssp.h>
 
 #include "delay.h"
+#include "platform_gpio.h"
 #include "platform_scu.h"
 
 /* Driver instance. */
@@ -40,14 +41,16 @@ ice40_spi_driver_t ice40 = {
 	.bus = &spi_bus_ssp1,
 };
 
-void ssp1_set_mode_ice40(void)
-{
-	spi_bus_start(&spi_bus_ssp1, &ssp_config_ice40_fpga);
-}
-
 void ice40_spi_target_init(ice40_spi_driver_t* const drv)
 {
+	const platform_gpio_t* gpio = platform_gpio();
 	const platform_scu_t* scu = platform_scu();
+
+	/* Configure drivers and driver pins */
+	ssp_config_ice40_fpga.gpio_select = gpio->fpga_cfg_spi_cs;
+	ice40.gpio_select = gpio->fpga_cfg_spi_cs;
+	ice40.gpio_creset = gpio->fpga_cfg_creset;
+	ice40.gpio_cdone = gpio->fpga_cfg_cdone;
 
 	/* Configure SSP1 Peripheral and relevant FPGA pins. */
 	scu_pinmux(scu->SSP1_CIPO, (SCU_SSP_IO | SCU_CONF_FUNCTION5));
@@ -67,14 +70,14 @@ void ice40_spi_target_init(ice40_spi_driver_t* const drv)
 uint8_t ice40_spi_read(ice40_spi_driver_t* const drv, uint8_t r)
 {
 	uint8_t value[3] = {r & 0x7F, 0, 0};
-	spi_bus_transfer(drv->bus, value, 3);
+	spi_bus_transfer(drv->bus, &ssp_config_ice40_fpga, value, 3);
 	return value[2];
 }
 
 void ice40_spi_write(ice40_spi_driver_t* const drv, uint8_t r, uint16_t v)
 {
 	uint8_t value[3] = {(r & 0x7F) | 0x80, v, 0};
-	spi_bus_transfer(drv->bus, value, 3);
+	spi_bus_transfer(drv->bus, &ssp_config_ice40_fpga, value, 3);
 }
 
 static void spi_ssp1_wait_for_tx_fifo_not_full(void)
@@ -107,19 +110,21 @@ bool ice40_spi_syscfg_program(
 	size_t (*read_block_cb)(void* ctx),
 	void* read_ctx)
 {
+	spi_bus_start(drv->bus, &ssp_config_ice40_fpga);
+
 	// Drive CRESET_B = 0, SPI_SS = 0, SPI_SCK = 1.
 	gpio_clear(drv->gpio_creset);
 	gpio_clear(drv->gpio_select);
 
 	// Wait a minimum of 200 ns.
-	delay_us_at_mhz(1, 204 / 4); // 250 ns.
+	delay_us(1);
 
 	// Release CRESET_B or drive CRESET_B = 1.
 	gpio_set(drv->gpio_creset);
 
 	// Wait a minimum of 1200 μs to clear internal configuration memory.
 	// Testing showed us that we need to wait longer. Let's wait 1800 μs.
-	delay_us_at_mhz(1800, 204);
+	delay_us(1800);
 
 	// Set SPI_SS = 1, Send 8 dummy clocks.
 	gpio_set(drv->gpio_select);
