@@ -44,13 +44,22 @@ jobs:
               -DPKG_CONFIG_EXECUTABLE=C:/vcpkg/installed/x64-windows/tools/pkgconf/pkgconf.exe
               -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
               --install-prefix=$env:GITHUB_WORKSPACE/install
+          # windows-latest now ships only Visual Studio 2026, whose CMake
+          # generator ("Visual Studio 18 2026") requires CMake >= 4.2.
+          # Run older CMake versions on windows-2022 (Visual Studio 2022).
+          - sys: {os: 'windows', shell: 'pwsh'}
+            cmake: '3.21.0'
+            runner: 'windows-2022'
+          - sys: {os: 'windows', shell: 'pwsh'}
+            cmake: '4.0.0'
+            runner: 'windows-2022'
           - sys: {os: 'windows', shell: 'msys2'}
             cmake_args: >-
               --install-prefix=/usr/local
 
       # Don't cancel all builds when one fails
       fail-fast: false
-    runs-on: ${{ matrix.sys.os }}-latest
+    runs-on: ${{ matrix.runner || format('{0}-latest', matrix.sys.os) }}
 
     defaults:
       run:

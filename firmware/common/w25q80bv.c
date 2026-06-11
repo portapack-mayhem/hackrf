@@ -36,6 +36,7 @@
 
 #include "flashsize.h"
 #include "platform_detect.h"
+#include "platform_gpio.h"
 #include "w25q80bv_target.h"
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -68,6 +69,22 @@ w25q80bv_driver_t spi_flash = {
 	.target_init = w25q80bv_target_init,
 };
 
+static void w25q80bv_transfer(
+	w25q80bv_driver_t* const drv,
+	void* const data,
+	const size_t count)
+{
+	spi_bus_transfer(drv->bus, &ssp_config_w25q80bv, data, count);
+}
+
+static void w25q80bv_transfer_gather(
+	w25q80bv_driver_t* const drv,
+	const spi_transfer_t* const transfers,
+	size_t size)
+{
+	spi_bus_transfer_gather(drv->bus, &ssp_config_w25q80bv, transfers, size);
+}
+
 /*
  * Set up pins for GPIO and SPI control, configure SSP0 peripheral for SPI.
  * SSP0_CS is controlled by GPIO in order to handle various transfer lengths.
@@ -75,6 +92,11 @@ w25q80bv_driver_t spi_flash = {
 void w25q80bv_setup(w25q80bv_driver_t* const drv)
 {
 	uint8_t device_id;
+	const platform_gpio_t* gpio = platform_gpio();
+
+	ssp_config_w25q80bv.gpio_select = gpio->w25q80bv_select;
+	spi_flash.gpio_hold = gpio->w25q80bv_hold;
+	spi_flash.gpio_wp = gpio->w25q80bv_wp;
 
 	drv->page_len = 256U;
 	if (detected_platform() == BOARD_ID_PRALINE) {
@@ -97,7 +119,7 @@ void w25q80bv_setup(w25q80bv_driver_t* const drv)
 uint8_t w25q80bv_get_status(w25q80bv_driver_t* const drv)
 {
 	uint8_t data[] = {W25Q80BV_READ_STATUS1, 0xFF};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 	return data[1];
 }
 
@@ -105,7 +127,7 @@ uint8_t w25q80bv_get_status(w25q80bv_driver_t* const drv)
 uint8_t w25q80bv_get_device_id(w25q80bv_driver_t* const drv)
 {
 	uint8_t data[] = {W25Q80BV_DEVICE_ID, 0xFF, 0xFF, 0xFF, 0xFF};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 	return data[4];
 }
 
@@ -125,7 +147,7 @@ void w25q80bv_get_unique_id(w25q80bv_driver_t* const drv, w25q80bv_unique_id_t* 
 		0xFF,
 		0xFF,
 		0xFF};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 
 	for (size_t i = 0; i < 8; i++) {
 		unique_id->id_8b[i] = data[5 + i];
@@ -142,7 +164,7 @@ void w25q80bv_write_enable(w25q80bv_driver_t* const drv)
 	w25q80bv_wait_while_busy(drv);
 
 	uint8_t data[] = {W25Q80BV_WRITE_ENABLE};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 	while (!(w25q80bv_get_status(drv) & W25Q80BV_STATUS_WEL)) {}
 }
 
@@ -160,7 +182,7 @@ void w25q80bv_chip_erase(w25q80bv_driver_t* const drv)
 	w25q80bv_write_enable(drv);
 
 	uint8_t data[] = {W25Q80BV_CHIP_ERASE};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 }
 
 /* write up a 256 byte page or partial page */
@@ -191,7 +213,7 @@ static void w25q80bv_page_program(
 
 	const spi_transfer_t transfers[] = {{header, ARRAY_SIZE(header)}, {data, len}};
 
-	spi_bus_transfer_gather(drv->bus, transfers, ARRAY_SIZE(transfers));
+	w25q80bv_transfer_gather(drv, transfers, ARRAY_SIZE(transfers));
 }
 
 /* write an arbitrary number of bytes */
@@ -266,7 +288,7 @@ void w25q80bv_read(
 
 	const spi_transfer_t transfers[] = {{header, ARRAY_SIZE(header)}, {data, len}};
 
-	spi_bus_transfer_gather(drv->bus, transfers, ARRAY_SIZE(transfers));
+	w25q80bv_transfer_gather(drv, transfers, ARRAY_SIZE(transfers));
 }
 
 void w25q80bv_clear_status(w25q80bv_driver_t* const drv)
@@ -274,16 +296,16 @@ void w25q80bv_clear_status(w25q80bv_driver_t* const drv)
 	w25q80bv_wait_while_busy(drv);
 	w25q80bv_write_enable(drv);
 	uint8_t data[] = {W25Q80BV_WRITE_STATUS, 0x00, 0x00};
-	spi_bus_transfer(drv->bus, data, ARRAY_SIZE(data));
+	w25q80bv_transfer(drv, data, ARRAY_SIZE(data));
 }
 
 void w25q80bv_get_full_status(w25q80bv_driver_t* const drv, uint8_t* data)
 {
 	uint8_t cmd[] = {W25Q80BV_READ_STATUS1, 0xFF};
-	spi_bus_transfer(drv->bus, cmd, ARRAY_SIZE(cmd));
+	w25q80bv_transfer(drv, cmd, ARRAY_SIZE(cmd));
 	data[0] = cmd[1];
 	cmd[0] = W25Q80BV_READ_STATUS2;
 	cmd[1] = 0xFF;
-	spi_bus_transfer(drv->bus, cmd, ARRAY_SIZE(cmd));
+	w25q80bv_transfer(drv, cmd, ARRAY_SIZE(cmd));
 	data[1] = cmd[1];
 }
