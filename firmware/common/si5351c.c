@@ -408,8 +408,20 @@ void si5351c_init(si5351c_driver_t* const drv)
 		selftest.report.pass = false;
 	}
 
-	/* Wait for on-chip initialization to complete. */
-	while (get_SYS_INIT(drv)) {
+	/*
+	 * Wait for on-chip initialization to complete.
+	 *
+	 * Bounded wait: some parts never report SYS_INIT clearing (notably the
+	 * clone Si5351 chips found on HackRF Pro / H4M and other clones, whose
+	 * device-status register reads back 0xFF). An unbounded poll hangs the
+	 * whole firmware there - no clock generator, no FPGA sample clock, so no
+	 * waterfall/spectrum, and in RAM (PortaPack "HackRF mode") it hangs before
+	 * USB enumeration. Give up after a reasonable timeout and proceed, which
+	 * matches the behavior before this wait was introduced (commit 50ce9090).
+	 * Genuine parts clear SYS_INIT within ~25 ms.
+	 */
+	for (int ms = 0; ms < 100 && get_SYS_INIT(drv); ms++) {
+		delay_ms(1);
 		si5351c_read_single(drv, SYS_INIT);
 	}
 
