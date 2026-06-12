@@ -445,7 +445,20 @@ int main(void)
 #ifdef IS_PRALINE
 	if (IS_PRALINE) {
 		enable_3v3aux_power();
-	#if !defined(DFU_MODE) && !defined(RAM_MODE)
+	/*
+	 * PortaPack/Mayhem fork divergence from upstream:
+	 *
+	 * Upstream skips these in RAM_MODE because its RAM image is loaded by the
+	 * DFU bootloader, which has already powered the FPGA and RF rails. In the
+	 * PortaPack "HackRF mode", however, this RAM image is loaded by the Mayhem
+	 * firmware, which does NOT enable them, so we must turn them on here.
+	 * Without the 1V2 (FPGA) supply and the clock generator there is no FPGA
+	 * configuration (so no waterfall/spectrum), and without VAA there is no RF.
+	 *
+	 * Only DFU_MODE is excluded. Do not re-add `&& !defined(RAM_MODE)` here:
+	 * doing so reverts fork fix f70bdb94 and breaks Praline (HackRF Pro / H4M).
+	 */
+	#if !defined(DFU_MODE)
 		enable_1v2_power();
 		enable_rf_power();
 		/*
