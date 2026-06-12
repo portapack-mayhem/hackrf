@@ -30,6 +30,7 @@
 #include "delay.h"
 #include "spi_bus.h"
 #include "w25q80bv.h"
+#include "platform_gpio.h"
 
 struct fpga_image_read_ctx {
 	struct fpga_loader_t* loader;
@@ -108,6 +109,17 @@ static bool fpga_image_load_from_spifi(unsigned int index)
 // PRALINE: FPGA bitstream is in flash at 0x380000 (SPIFI mapped at 0x14380000)
 #define FPGA_BITSTREAM_FLASH_ADDR 0x380000
 
+	/*
+	 * Fork RAM-mode loader: w25q80bv_setup() initializes the flash CS/HOLD/WP
+	 * GPIOs, but it runs AFTER spi_bus_start() below, and spi_bus_start() ->
+	 * spi_ssp_start() configures SSP0 chip-select from ssp_config_w25q80bv.gpio_select.
+	 * If unset, the flash CS never drives and reads hang forever in w25q80bv_setup
+	 * device-ID loop. Initialize the flash GPIOs here first.
+	 */
+	const platform_gpio_t* gpio = platform_gpio();
+	ssp_config_w25q80bv.gpio_select = gpio->w25q80bv_select;
+	spi_flash.gpio_hold = gpio->w25q80bv_hold;
+	spi_flash.gpio_wp = gpio->w25q80bv_wp;
 	spi_bus_start(spi_flash.bus, &ssp_config_w25q80bv);
 	w25q80bv_setup(&spi_flash);
 
