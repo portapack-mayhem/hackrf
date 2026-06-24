@@ -24,8 +24,6 @@
 #include <stdint.h>
 
 #include "hackrf_ui.h"
-#include "i2c_bus.h"
-#include "i2c_lpc.h"
 #include "platform_detect.h"
 #include "sgpio.h"
 #include "si5351c.h"
@@ -36,8 +34,6 @@
 
 void clock_gen_init(void)
 {
-	i2c_bus_start(si5351c.bus, &i2c_config_fast_clock);
-
 	si5351c_init(&si5351c);
 	si5351c_disable_all_outputs(&si5351c);
 	si5351c_disable_oeb_pin_control(&si5351c);
@@ -120,7 +116,6 @@ void clock_gen_init(void)
 
 void clock_gen_shutdown(void)
 {
-	i2c_bus_start(si5351c.bus, &i2c_config_fast_clock);
 	si5351c_disable_all_outputs(&si5351c);
 	si5351c_disable_oeb_pin_control(&si5351c);
 	si5351c_power_down_all_clocks(&si5351c);
@@ -131,7 +126,7 @@ clock_source_t activate_best_clock_source(void)
 #ifdef IS_EXPANSION_COMPATIBLE
 	if (IS_EXPANSION_COMPATIBLE) {
 		/* Ensure PortaPack reference oscillator is off while checking for external clock input. */
-		if (portapack_reference_oscillator && portapack()) {
+		if (portapack_present()) {
 			portapack_reference_oscillator(false);
 		}
 	}
@@ -146,7 +141,7 @@ clock_source_t activate_best_clock_source(void)
 #ifdef IS_EXPANSION_COMPATIBLE
 		if (IS_EXPANSION_COMPATIBLE) {
 			/* Enable PortaPack reference oscillator (if present), and check for valid clock. */
-			if (portapack_reference_oscillator && portapack()) {
+			if (portapack_present()) {
 				portapack_reference_oscillator(true);
 				delay_ms(18); // for oscillator to enable.
 				if (si5351c_clkin_signal_valid(&si5351c)) {
