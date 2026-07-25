@@ -96,12 +96,12 @@ usb_request_status_t usb_vendor_request_set_baseband_filter_bandwidth(
 			(endpoint->setup.index << 16) | endpoint->setup.value;
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_BB_BANDWIDTH_TX,
 			bandwidth);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_BB_BANDWIDTH_RX,
 			bandwidth);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -125,22 +125,22 @@ usb_request_status_t usb_vendor_request_set_freq(
 			set_freq_params.freq_mhz * 1000000ULL + set_freq_params.freq_hz;
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_RF,
 			freq * FP_ONE_HZ);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_IF,
 			RADIO_UNSET);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_LO,
 			RADIO_UNSET);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_IMAGE_REJECT,
 			RADIO_UNSET);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -162,17 +162,17 @@ usb_request_status_t usb_vendor_request_set_freq_explicit(
 	} else if (stage == USB_TRANSFER_STAGE_DATA) {
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_IF,
 			explicit_params.if_freq_hz * FP_ONE_HZ);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_LO,
 			explicit_params.lo_freq_hz * FP_ONE_HZ);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_IMAGE_REJECT,
 			explicit_params.path);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -217,7 +217,7 @@ usb_request_status_t usb_vendor_request_set_sample_rate_frac(
 		uint32_t numerator = set_sample_r_params.freq_hz;
 		uint32_t denominator = set_sample_r_params.divider;
 		uint64_t value = round_sample_rate(numerator, denominator);
-		radio_reg_write(&radio, RADIO_BANK_ACTIVE, RADIO_SAMPLE_RATE, value);
+		radio_reg_write(&radio, RADIO_BANK_REQUESTED, RADIO_SAMPLE_RATE, value);
 		usb_transfer_schedule_ack(endpoint->in);
 	}
 	return USB_REQUEST_STATUS_OK;
@@ -230,12 +230,12 @@ usb_request_status_t usb_vendor_request_set_amp_enable(
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_GAIN_TX_RF,
 			endpoint->setup.value);
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_GAIN_RX_RF,
 			endpoint->setup.value);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -249,7 +249,7 @@ usb_request_status_t usb_vendor_request_set_lna_gain(
 {
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		uint8_t gain = endpoint->setup.index;
-		radio_reg_write(&radio, RADIO_BANK_ACTIVE, RADIO_GAIN_RX_IF, gain);
+		radio_reg_write(&radio, RADIO_BANK_REQUESTED, RADIO_GAIN_RX_IF, gain);
 		endpoint->buffer[0] = RADIO_OK;
 		usb_transfer_schedule_block(
 			endpoint->in,
@@ -268,7 +268,7 @@ usb_request_status_t usb_vendor_request_set_vga_gain(
 {
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		uint8_t gain = endpoint->setup.index;
-		radio_reg_write(&radio, RADIO_BANK_ACTIVE, RADIO_GAIN_RX_BB, gain);
+		radio_reg_write(&radio, RADIO_BANK_REQUESTED, RADIO_GAIN_RX_BB, gain);
 		endpoint->buffer[0] = RADIO_OK;
 		usb_transfer_schedule_block(
 			endpoint->in,
@@ -287,7 +287,7 @@ usb_request_status_t usb_vendor_request_set_txvga_gain(
 {
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		uint8_t gain = endpoint->setup.index;
-		radio_reg_write(&radio, RADIO_BANK_ACTIVE, RADIO_GAIN_TX_IF, gain);
+		radio_reg_write(&radio, RADIO_BANK_REQUESTED, RADIO_GAIN_TX_IF, gain);
 		endpoint->buffer[0] = RADIO_OK;
 		usb_transfer_schedule_block(
 			endpoint->in,
@@ -317,7 +317,7 @@ usb_request_status_t usb_vendor_request_set_antenna_enable(
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_BIAS_TEE,
 			endpoint->setup.value);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -429,7 +429,7 @@ usb_request_status_t usb_vendor_request_set_hw_sync_mode(
 	if (stage == USB_TRANSFER_STAGE_SETUP) {
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_TRIGGER,
 			endpoint->setup.value);
 		usb_transfer_schedule_ack(endpoint->in);

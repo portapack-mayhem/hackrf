@@ -132,7 +132,7 @@ usb_request_status_t usb_vendor_request_init_sweep(
 
 		radio_reg_write(
 			&radio,
-			RADIO_BANK_ACTIVE,
+			RADIO_BANK_REQUESTED,
 			RADIO_FREQUENCY_RF,
 			(sweep_freq + offset) * FP_ONE_HZ);
 		usb_transfer_schedule_ack(endpoint->in);
@@ -263,7 +263,7 @@ void sweep_mode(uint32_t seq)
 			nvic_disable_irq(NVIC_USB0_IRQ);
 			radio_reg_write(
 				&radio,
-				RADIO_BANK_ACTIVE,
+				RADIO_BANK_REQUESTED,
 				RADIO_FREQUENCY_RF,
 				(sweep_freq + offset) * FP_ONE_HZ);
 			nvic_enable_irq(NVIC_USB0_IRQ);

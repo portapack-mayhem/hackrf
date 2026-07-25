@@ -191,7 +191,7 @@ typedef enum {
 	 (1 << RADIO_GAIN_RX_IF) | (1 << RADIO_GAIN_RX_BB))
 
 /**
- * Register bank RADIO_BANK_ACTIVE stores the active configuration. Active
+ * Register bank RADIO_BANK_REQUESTED stores the active configuration. Active
  * register settings are copied to the applied register when applied.
  *
  * The other three banks store settings that will be applied when switching to
@@ -202,7 +202,7 @@ typedef enum {
  */
 typedef enum {
 	RADIO_BANK_APPLIED = 0,
-	RADIO_BANK_ACTIVE = 1,
+	RADIO_BANK_REQUESTED = 1,
 	RADIO_BANK_IDLE = 2,
 	RADIO_BANK_RX = 3,
 	RADIO_BANK_TX = 4,
@@ -237,7 +237,7 @@ typedef struct {
 void radio_init(radio_t* const radio);
 
 /**
- * Write to one or more registers. Writes to RADIO_BANK_ACTIVE are applied at
+ * Write to one or more registers. Writes to RADIO_BANK_REQUESTED are applied at
  * the next radio_update(). Writes to RADIO_BANK_APPLIED are not supported.
  */
 radio_error_t radio_reg_write(
@@ -255,7 +255,7 @@ uint64_t radio_reg_read(
 	const radio_register_t reg);
 
 /**
- * Apply changes requested in RADIO_BANK_ACTIVE.
+ * Apply changes requested in RADIO_BANK_REQUESTED.
  * Return true if any changes were applied.
  */
 bool radio_update(radio_t* const radio);

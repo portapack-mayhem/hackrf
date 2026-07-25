@@ -54,7 +54,7 @@ void radio_init(radio_t* const radio)
 		}
 	}
 	radio->config[RADIO_BANK_APPLIED][RADIO_OPMODE] = TRANSCEIVER_MODE_OFF;
-	radio->config[RADIO_BANK_ACTIVE][RADIO_OPMODE] = TRANSCEIVER_MODE_OFF;
+	radio->config[RADIO_BANK_REQUESTED][RADIO_OPMODE] = TRANSCEIVER_MODE_OFF;
 	radio->config[RADIO_BANK_IDLE][RADIO_OPMODE] = TRANSCEIVER_MODE_OFF;
 	radio->config[RADIO_BANK_RX][RADIO_OPMODE] = TRANSCEIVER_MODE_RX;
 	radio->config[RADIO_BANK_TX][RADIO_OPMODE] = TRANSCEIVER_MODE_TX;
@@ -78,7 +78,7 @@ radio_error_t radio_reg_write(
 	}
 
 	switch (bank) {
-	case RADIO_BANK_ACTIVE:
+	case RADIO_BANK_REQUESTED:
 		mark_dirty(radio, reg);
 		/* fall through */
 	case RADIO_BANK_IDLE:
@@ -937,7 +937,7 @@ bool radio_update(radio_t* const radio)
 		return false;
 	}
 	radio->regs_dirty = 0;
-	memcpy(&tmp_bank[0], &(radio->config[RADIO_BANK_ACTIVE][0]), sizeof(tmp_bank));
+	memcpy(&tmp_bank[0], &(radio->config[RADIO_BANK_REQUESTED][0]), sizeof(tmp_bank));
 	nvic_enable_irq(NVIC_USB0_IRQ);
 
 	if ((dirty & RADIO_REG_GROUP_RATE) ||
@@ -998,14 +998,14 @@ void radio_switch_opmode(radio_t* const radio, const transceiver_mode_t mode)
 	nvic_disable_irq(NVIC_USB0_IRQ);
 	for (uint8_t reg = 0; reg < RADIO_NUM_REGS; reg++) {
 		value = radio->config[source_bank][reg];
-		previous = radio->config[RADIO_BANK_ACTIVE][reg];
+		previous = radio->config[RADIO_BANK_REQUESTED][reg];
 		if ((value != RADIO_UNSET) && (value != previous)) {
-			radio->config[RADIO_BANK_ACTIVE][reg] = value;
+			radio->config[RADIO_BANK_REQUESTED][reg] = value;
 			mark_dirty(radio, reg);
 		}
 	}
 
-	radio->config[RADIO_BANK_ACTIVE][RADIO_OPMODE] = mode;
+	radio->config[RADIO_BANK_REQUESTED][RADIO_OPMODE] = mode;
 	mark_dirty(radio, RADIO_OPMODE);
 	nvic_enable_irq(NVIC_USB0_IRQ);
 	radio_update(radio);
