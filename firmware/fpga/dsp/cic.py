@@ -6,8 +6,8 @@
 
 from math                   import floor, log2, ceil, comb
 
-from amaranth               import Module, Signal, Const, signed, ResetInserter, DomainRenamer, C
-from amaranth.utils         import bits_for
+from amaranth               import Module, Signal, Const, Mux, signed, ResetInserter, DomainRenamer
+from amaranth.utils         import bits_for, exact_log2
 
 from amaranth.lib           import wiring, stream, data
 from amaranth.lib.wiring    import In, Out, connect
@@ -17,6 +17,7 @@ from dsp.round              import convergent_round
 
 class CICInterpolator(wiring.Component):
     def __init__(self, M, stages, rates, width_in, width_out=None, num_channels=1, always_ready=False, domain="sync"):
+        assert all((r & (r-1)) == 0 for r in rates), "rates must be powers of 2"
         self.M         = M
         self.stages    = stages
         self.rates     = rates
@@ -60,11 +61,13 @@ class CICInterpolator(wiring.Component):
         stages = []
 
         # When M=1, we can replace the inner CIC stage with an equivalent zero-order hold integrator.
-        inner_zoh = self.M == 1
+        # When M=2, we can replace the inner CIC stage with a special upsampler that adds the last 2 samples.
+        inner_zoh = list(self.rates) != [1] and self.M == 1
+        m2_upsampler = list(self.rates) != [1] and self.M == 2
 
         # Comb stages.
         width = self.width_in
-        for i in range(self.stages - int(inner_zoh)):
+        for i in range(self.stages - int(inner_zoh + m2_upsampler)):
             next_width = self.width_in + next(bit_growths)
             stage = factor_reset(CombStage(self.M, width, width_out=next_width, num_channels=self.num_channels, always_ready=always_ready))
             m.submodules[f"comb{i}"] = stage
@@ -73,31 +76,33 @@ class CICInterpolator(wiring.Component):
         
         # Upsampling.
         if list(self.rates) != [1]:
-            if inner_zoh:
-                _ = next(bit_growths), next(bit_growths)  # drop comb and integrator growths
-            stage = factor_reset(Upsampler(self.num_channels * width, max(self.rates), zero_order_hold=inner_zoh, variable=True, always_ready=always_ready))
+            if not m2_upsampler:
+                if inner_zoh:
+                    _ = next(bit_growths), next(bit_growths)  # drop comb and integrator growths
+                stage = factor_reset(Upsampler(self.num_channels * width, max(self.rates), zero_order_hold=inner_zoh, variable=True, always_ready=always_ready))
+            else:
+                next_width = self.width_in + next(bit_growths)
+                stage = factor_reset(UpsamplerM2(width, next_width, max(self.rates), variable=True, num_channels=self.num_channels, always_ready=always_ready))
+                width = next_width
+                _ = next(bit_growths)
             m.submodules["upsampler"] = stage
-            m.d.sync += stage.factor.eq(1 << self.factor)
+            m.d.sync += stage.factor.eq((1 << self.factor)-1)
             stages += [ stage ]
 
         # Integrator stages.
-        for i in range(self.stages - int(inner_zoh)):
+        for i in range(self.stages - int(inner_zoh + m2_upsampler)):
             width_out = self.width_in + next(bit_growths)
-            stage = SignExtend(width, width_out, num_channels=self.num_channels, always_ready=always_ready)
-            m.submodules[f"signextend{i}"] = stage
-            stages += [ stage ]
-            stage = factor_reset(IntegratorStage(width_out, width_out, num_channels=self.num_channels, always_ready=always_ready))
+            stage = factor_reset(IntegratorStage(width, width_out, accum_width=width_out, num_channels=self.num_channels, always_ready=always_ready))
             m.submodules[f"integrator{i}"] = stage
             stages += [ stage ]
             width = width_out
     
         # Variable gain stage.
-        min_shift = self.width_in + cic_growth(N=self.stages, M=self.M, R=min(self.rates))[-1] - self.width_out  # at min rate
-        shift_per_rate = { int(log2(rate)): min_shift + (self.stages-1)*i for i, rate in enumerate(self.rates) }
+        shift_per_rate = { exact_log2(rate): (self.stages-1) * (exact_log2(max(self.rates)) - exact_log2(rate)) for rate in self.rates }
         stage = factor_reset(ProgrammableShift(width, width_out=self.width_out, num_channels=self.num_channels, shift_map=shift_per_rate, always_ready=always_ready))
         m.submodules["gain"] = stage
         if len(self.rates) > 1:
-            m.d.sync += stage.shift.eq(self.factor)
+            m.d.sync += stage.factor.eq(self.factor)
         stages += [ stage ]
         width = self.width_out
 
@@ -117,6 +122,7 @@ class CICInterpolator(wiring.Component):
 
 class CICDecimator(wiring.Component):
     def __init__(self, M, stages, rates, width_in, width_out=None, num_channels=1, always_ready=False, domain="sync"):
+        assert all((r & (r-1)) == 0 for r in rates), "rates must be powers of 2"
         self.M            = M
         self.stages       = stages
         self.rates        = rates
@@ -124,7 +130,7 @@ class CICDecimator(wiring.Component):
         self.num_channels = num_channels
         self._domain      = domain
         if width_out is None:
-            width_out    = width_in + ceil(stages * log2(max(rates) * M))
+            width_out    = width_in + (stages * exact_log2(max(rates) * M))
         self.width_out    = width_out
         super().__init__({
             "input":  In(stream.Signature(
@@ -150,7 +156,7 @@ class CICDecimator(wiring.Component):
 
         always_ready = self.output.signature.always_ready
 
-        full_width = self.width_in + ceil(self.stages * log2(max(self.rates) * self.M))
+        full_width = self.width_in + (self.stages * exact_log2(max(self.rates) * self.M))
         stage_widths = ( full_width - n for n in self.truncation_summary() )
 
         # Sign extend stage
@@ -173,7 +179,7 @@ class CICDecimator(wiring.Component):
         if list(self.rates) != [1]:
             stage = Downsampler(self.num_channels * last_width, max(self.rates), variable=True, always_ready=always_ready)
             m.submodules["downsampler"] = stage
-            m.d.sync += stage.factor.eq(1 << self.factor)
+            m.d.sync += stage.factor.eq((1 << self.factor)-1)
             stages += [ stage ]
 
         # Comb stages
@@ -187,7 +193,7 @@ class CICDecimator(wiring.Component):
         # Gain stage
 
         # Ensure filter gain is at least the gain from width conversion.
-        min_growth = ceil(self.stages * log2(min(self.rates) * self.M))
+        min_growth = self.stages * exact_log2(min(self.rates) * self.M)
         if min_growth < self.width_out - self.width_in:
             growth = self.width_out - self.width_in - min_growth
             stage = WidthConverter(last_width, last_width+growth, num_channels=self.num_channels, always_ready=always_ready)
@@ -195,13 +201,14 @@ class CICDecimator(wiring.Component):
             stages += [ stage ]
             last_width = last_width + growth
 
+        shift_per_rate = { exact_log2(rate): self.stages * (exact_log2(max(self.rates)) - exact_log2(rate)) for rate in self.rates }
+        # clip=False: we assume that rounding-induced overflow is not possible in decimator. Provide a test for that.
+        stage = ProgrammableShift(last_width, width_out=self.width_out, num_channels=self.num_channels, shift_map=shift_per_rate, clip=False, always_ready=always_ready)
+        m.submodules["gain"] = stage
         if len(self.rates) > 1:
-            shift_per_rate = { int(log2(rate)): self.stages*i for i, rate in enumerate(self.rates) }
-            stage = ProgrammableShift(last_width, width_out=self.width_out, num_channels=self.num_channels, shift_map=shift_per_rate, always_ready=always_ready)
-            m.submodules["gain"] = stage
-            m.d.sync += stage.shift.eq(self.factor)
-            stages += [stage]
-            last_width = self.width_out
+            m.d.sync += stage.factor.eq(self.factor)
+        stages += [stage]
+        last_width = self.width_out
 
         # Connect stages, rounding/truncating where needed
         last = wiring.flipped(self.input)
@@ -217,13 +224,14 @@ class CICDecimator(wiring.Component):
 
 
 class ProgrammableShift(wiring.Component):
-    def __init__(self, width_in, shift_map, width_out=None, num_channels=1, always_ready=False):
+    def __init__(self, width_in, shift_map, clip=True, width_out=None, num_channels=1, always_ready=False):
         self.num_channels = num_channels
         self.width_in = width_in
         self.width_out = width_out or width_in
         self.shift_map = shift_map
+        self.clip = clip
         if len(self.shift_map) == 1:
-            self.shift = C(list(self.shift_map.keys())[0])
+            self.factor = Const(list(self.shift_map.keys())[0])
         super().__init__({
             "input":  In(stream.Signature(
                 data.ArrayLayout(signed(self.width_in), num_channels),
@@ -233,45 +241,34 @@ class ProgrammableShift(wiring.Component):
                 data.ArrayLayout(signed(self.width_out), num_channels),
                 always_ready=always_ready
             )),
-        } | ({"shift":  In(range(max(shift_map.keys())+1))} if len(shift_map)>1 else {}))
+        } | ({"factor":  In(range(max(shift_map.keys())+1))} if len(shift_map)>1 else {}))
 
     def elaborate(self, platform):
         m = Module()
 
-        # Implement the map itself (should it be done outside?)
-        max_shift = max(self.shift_map.values())
-        min_shift = min(self.shift_map.values())
-
-        value_scaled = [ Signal(signed(self.width_in + max_shift)) for _ in range(self.num_channels) ]
-        scaled_valid = Signal()
-        scaled_ready = Signal()
-
-        with m.If(~scaled_valid | scaled_ready):
-            if not self.input.signature.always_ready:
-                m.d.comb += self.input.ready.eq(1)
-            m.d.sync += scaled_valid.eq(self.input.valid)
-            with m.If(self.input.valid):
-                for c in range(self.num_channels):
-                    with m.Switch(self.shift):
-                        for k, v in self.shift_map.items():
-                            with m.Case(k):
-                                m.d.sync += value_scaled[c].eq(self.input.payload[c] << (max_shift - v))
-                        with m.Default():
-                            m.d.sync += value_scaled[c].eq(self.input.payload[c] << (max_shift - min_shift))
+        # The input width is already prepared to fit the maximum gain. Other rates 
+        # might have a smaller gain, which is compensated with the proper shift.
+        value_scaled = Signal.like(self.input.p)
+        with m.Switch(self.factor):
+            for k, sh in self.shift_map.items():
+                with m.Case(k):
+                    for c in range(self.num_channels):
+                        m.d.comb += value_scaled[c].eq(self.input.p[c] << sh)
 
         with m.If(~self.output.valid | self.output.ready):
-            m.d.comb += scaled_ready.eq(1)
-            m.d.sync += self.output.valid.eq(scaled_valid)
-            with m.If(scaled_valid):
+            if not self.input.signature.always_ready:
+                m.d.comb += self.input.ready.eq(1)
+            m.d.sync += self.output.valid.eq(self.input.valid)
+            with m.If(self.input.valid):
                 for c in range(self.num_channels):
-                    if max_shift > 0:
+                    shift = self.width_in - self.width_out
+                    if shift > 0:
                         # Convergent rounding / round to even.
-                        m.d.sync += self.output.payload[c].eq(convergent_round(value_scaled[c], max_shift))
-                        # Truncation.
-                        #m.d.sync += self.output.payload[c].eq(value_scaled[c][max_shift:])
+                        m.d.sync += self.output.payload[c].eq(convergent_round(value_scaled[c], shift, clip=self.clip))
+                        # Truncation. 
+                        #m.d.sync += self.output.payload[c].eq(value_scaled[c][shift:])
                     else:
-                        m.d.sync += self.output.payload[c].eq(value_scaled[c])
-        
+                        m.d.sync += self.output.payload[c][-shift:].eq(value_scaled[c])
         return m
 
 
@@ -323,7 +320,7 @@ class WidthConverter(wiring.Component):
         shift = self.width_out - self.width_in
 
         for c in range(self.num_channels):
-            m.d.comb += self.output.p[c].eq(self.input.p[c] << shift)
+            m.d.comb += self.output.p[c][shift:].eq(self.input.p[c])
         m.d.comb += self.output.valid.eq(self.input.valid)
         if not self.always_ready:
             m.d.comb += self.input.ready.eq(self.output.ready)
@@ -363,15 +360,16 @@ class CombStage(wiring.Component):
                 m.d.sync += [ delay[i].eq(delay[i-1]) for i in range(1, self.M) ]
                 for c in range(self.num_channels):
                     diff = self.input.p[c] - delay[-1][c]
-                    m.d.sync += self.output.p[c].eq(diff if shift == 0 else (diff >> shift))
+                    m.d.sync += self.output.p[c].eq(diff[shift:])
 
         return m
 
 
 class IntegratorStage(wiring.Component):
-    def __init__(self, width_in, width_out, num_channels=1, always_ready=False):
+    def __init__(self, width_in, width_out, accum_width=None, num_channels=1, always_ready=False):
         self.width_in = width_in
         self.width_out = width_out
+        self.accum_width = accum_width or self.width_in
         self.num_channels = num_channels
         super().__init__({
             "input":  In(stream.Signature(
@@ -387,11 +385,11 @@ class IntegratorStage(wiring.Component):
     def elaborate(self, platform):
         m = Module()
 
-        shift = max(self.width_in - self.width_out, 0)
+        shift = max(self.accum_width - self.width_out, 0)
 
-        accumulator = Signal.like(self.input.p)
+        accumulator = Signal(data.ArrayLayout(signed(self.accum_width), self.num_channels))
         for c in range(self.num_channels):
-            m.d.comb += self.output.payload[c].eq(accumulator[c] if shift == 0 else (accumulator[c] >> shift))
+            m.d.comb += self.output.payload[c].eq(accumulator[c][shift:].as_signed())
 
         with m.If(~self.output.valid | self.output.ready):
             if not self.input.signature.always_ready:
@@ -413,7 +411,7 @@ class Upsampler(wiring.Component):
             "output": Out(stream.Signature(width, always_ready=always_ready)),
         }
         if variable:
-            signature.update({"factor": In(range(factor + 1))})
+            signature.update({"factor": In(range(factor))})
         else:
             self.factor = Const(factor)
         super().__init__(signature)
@@ -422,24 +420,57 @@ class Upsampler(wiring.Component):
         m = Module()
 
         counter = Signal.like(self.factor)
-        ready_stb = Signal(init=1)
-        if not self.input.signature.always_ready:
-            m.d.comb += self.input.ready.eq(ready_stb)
 
         with m.If(~self.output.valid | self.output.ready):
             with m.If(counter == 0):
+                if not self.input.signature.always_ready:
+                    m.d.comb += self.input.ready.eq(1)
                 m.d.sync += self.output.payload.eq(self.input.payload)
                 m.d.sync += self.output.valid.eq(self.input.valid)
                 with m.If(self.input.valid):
-                    m.d.sync += counter.eq(self.factor - 1)
-                    m.d.sync += ready_stb.eq(self.factor < 2)
+                    m.d.sync += counter.eq(self.factor)
             with m.Else():
                 if not self.zoh:
                     m.d.sync += self.output.payload.eq(0)
-                m.d.sync += self.output.valid.eq(1)
                 m.d.sync += counter.eq(counter - 1)
-                with m.If(counter == 1):
-                    m.d.sync += ready_stb.eq(1)
+
+        return m
+
+
+class UpsamplerM2(wiring.Component):
+    def __init__(self, width_in, width_out, factor, variable=False, num_channels=1, always_ready=False):
+        self.width_in = width_in
+        self.width_out = width_out
+        self.num_channels = num_channels
+        signature = {
+            "input":  In(stream.Signature(data.ArrayLayout(signed(width_in), num_channels), always_ready=always_ready)),
+            "output": Out(stream.Signature(data.ArrayLayout(signed(width_out), num_channels), always_ready=always_ready)),
+        }
+        if variable:
+            signature.update({"factor": In(range(factor))})
+        else:
+            self.factor = Const(factor)
+        super().__init__(signature)
+
+    def elaborate(self, platform):
+        m = Module()
+
+        counter = Signal.like(self.factor)
+        
+        last_payload = Signal.like(self.input.p)
+
+        with m.If(~self.output.valid | self.output.ready):
+            with m.If(counter == 0):
+                if not self.input.signature.always_ready:
+                    m.d.comb += self.input.ready.eq(1)
+                for c in range(self.num_channels):
+                    m.d.sync += self.output.p[c].eq(self.input.p[c] + last_payload[c])
+                m.d.sync += self.output.valid.eq(self.input.valid)
+                with m.If(self.input.valid):
+                    m.d.sync += last_payload.eq(self.input.payload)
+                    m.d.sync += counter.eq(self.factor)
+            with m.Else():
+                m.d.sync += counter.eq(counter - 1)
 
         return m
 
@@ -451,8 +482,7 @@ class Downsampler(wiring.Component):
             "output": Out(stream.Signature(width, always_ready=always_ready)),
         }
         if variable:
-            # TODO: optimize bit
-            signature.update({"factor": In(range(factor + 1))})
+            signature.update({"factor": In(range(factor))})
         else:
             self.factor = Const(factor)
         super().__init__(signature)
@@ -464,16 +494,16 @@ class Downsampler(wiring.Component):
 
         with m.If(self.input.ready & self.input.valid):
             with m.If(counter == 0):
-                m.d.sync += counter.eq(self.factor - 1)
+                m.d.sync += counter.eq(self.factor)
             with m.Else():
                 m.d.sync += counter.eq(counter - 1)
 
-        with m.If(self.output.ready | ~self.output.valid):
-            if not self.input.signature.always_ready:
-                m.d.comb += self.input.ready.eq(1)
-            m.d.sync += self.output.valid.eq(self.input.valid & (counter == 0))
-            with m.If(self.input.valid & (counter == 0)):
-                m.d.sync += self.output.payload.eq(self.input.payload)
+        m.d.comb += [
+            self.output.payload .eq(self.input.payload),
+            self.output.valid   .eq(self.input.valid & (counter == 0)),
+        ]
+        if not self.input.signature.always_ready:
+            m.d.comb += self.input.ready.eq(self.output.ready)
 
         return m
 
@@ -544,203 +574,3 @@ def cic_growth(N, R, M):
             G_i = (2**(2*N-i) * (R*M)**(i-N)) / R  # integration stage
         growths.append(ceil(log2(G_i)))
     return growths
-
-
-
-
-
-#
-# Tests
-#
-
-import unittest
-import numpy as np
-from amaranth.sim import Simulator
-from collections import namedtuple
-
-class _TestFilter(unittest.TestCase):
-
-    def _generate_samples(self, count, width, f_width=0):
-        # Generate `count` random samples.
-        rng = np.random.default_rng(0)
-        samples = rng.normal(0, 1, count)
-
-        # Convert to integer.
-        samples = np.round(samples / max(abs(samples)) * (2**(width-1) - 1)).astype(int)
-        assert max(samples) < 2**(width-1) and min(samples) >= -2**(width-1)  # sanity check
-
-        if f_width > 0:
-            return samples / (1 << f_width)
-        return samples
-
-    def _filter(self, dut, samples, count, oob=[], outfile=None):
-
-        async def input_process(ctx):
-            if hasattr(dut, "enable"):
-                ctx.set(dut.enable, 1)
-            for name, value in oob.items():
-                ctx.set(getattr(dut, name), value)
-            await ctx.tick()
-            await ctx.tick()
-
-            for sample in samples:
-                ctx.set(dut.input.payload, [sample.item()])
-                ctx.set(dut.input.valid, 1)
-                await ctx.tick().until(dut.input.ready)
-            ctx.set(dut.input.valid, 0)
-
-        filtered = []
-        async def output_process(ctx):
-            if not dut.output.signature.always_ready:
-                ctx.set(dut.output.ready, 1)
-            async for clk, rst, valid, payload in ctx.tick().sample(dut.output.valid, dut.output.payload):
-                if valid:
-                    filtered.append(payload[0])
-                if len(filtered) == count:
-                    break
-
-        sim = Simulator(dut)
-        sim.add_clock(1/100e6)
-        sim.add_testbench(input_process)
-        sim.add_testbench(output_process)
-        if outfile is not None:
-            with sim.write_vcd(outfile):
-                sim.run()
-        else:
-            sim.run()
-        
-        return filtered
-
-
-class TestCICDecimator(_TestFilter):
-
-    def test_filter(self):
-        num_samples = 1024
-        input_width = 8
-        input_samples = self._generate_samples(num_samples, input_width)
-
-        test = namedtuple('CICDecimatorTest', ['M', 'order', 'rates', 'factor_log', 'width_in', 'width_out', 'outfile'], defaults=(None,)*7)
-        cic_tests = []
-
-        # for different CIC orders...
-        for o in [1,2,3,4]:
-            # test signal with no rate change
-            cic_tests.append(test(M=1, order=o, rates=(1,), factor_log=0, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(1,), factor_log=0, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(1,), factor_log=0, width_in=8, width_out=12))
-
-            # test decimation by 4 with different M values and minimum decimation factors
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-
-            # different bit widths
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=9))
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=10))
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=0, width_in=8, width_out=12))
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=1, width_in=8, width_out=12))
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=12))
-            
-            # test fixed decimation by 32
-            cic_tests.append(test(M=1, order=o, rates=(32,), factor_log=5, width_in=8, width_out=8))
-
-
-        for t in cic_tests:
-            with self.subTest(t):
-                factor_log = t.factor_log
-                factor = 1 << factor_log
-                cic_order = t.order
-                M = t.M
-
-                # Build taps by convolving boxcar filter repeatedly.
-                taps0 = [1 for _ in range(factor*M)]
-                taps = [1]
-                for i in range(cic_order):
-                    taps = np.convolve(taps, taps0)
-
-                # Compute the expected result.
-                cic_gain = (factor*M)**cic_order
-                width_gain = 2**(t.width_out - t.width_in)
-                filtered_np = np.convolve(input_samples, taps)
-                filtered_np = filtered_np[::factor]                           # decimate
-                filtered_np = np.round(filtered_np * width_gain // cic_gain)  # scale
-                filtered_np = filtered_np.astype(np .int32).tolist()          # convert to python list
-
-                # Simulate DUT
-                dut = CICDecimator(M, cic_order, t.rates, t.width_in, t.width_out, always_ready=True)
-                filtered = self._filter(dut, input_samples, len(input_samples)//factor, oob={"factor":factor_log}, outfile=t.outfile)
-
-                # As we have some rounding error, we expect some samples to differ at most by 1
-                max_diff = np.max(np.abs(np.array(filtered) - np.array(filtered_np[:len(filtered)])))
-                
-                self.assertLessEqual(max_diff, 1)
-                #self.assertListEqual(filtered_np[:len(filtered)], filtered)
-
-
-class TestCICInterpolator(_TestFilter):
-
-    def test_filter(self):
-        num_samples = 1024
-
-        test = namedtuple('CICInterpolatorTest', ['M', 'order', 'rates', 'factor_log', 'width_in', 'width_out', 'outfile'], defaults=(None,)*7)
-        cic_tests = []
-
-        # for different CIC orders...
-        for o in [1,2,3,4]:
-            # test signal bypass
-            cic_tests.append(test(M=1, order=o, rates=(1,), factor_log=0, width_in=8, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(1,), factor_log=0, width_in=12, width_out=8))
-
-            # test interpolation by 4 with different M values and minimum interpolation factors
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(2, 4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(4, 8, 16, 32), factor_log=2, width_in=8, width_out=8))
-
-            # different bit widths
-            cic_tests.append(test(M=1, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=12, width_out=8))
-            cic_tests.append(test(M=2, order=o, rates=(1, 2, 4, 8, 16, 32), factor_log=2, width_in=12, width_out=8))
-            cic_tests.append(test(M=1, order=o, rates=(2, 4, 8, 16, 32), factor_log=2, width_in=12, width_out=8))
-
-            # test fixed interpolation by 32
-            cic_tests.append(test(M=1, order=o, rates=(32,), factor_log=5, width_in=8, width_out=8))
-
-            cic_tests.append(test(M=1, order=o, rates=(32,), factor_log=5, width_in=12, width_out=8))
-
-        for t in cic_tests:
-            with self.subTest(t):
-
-                input_samples = self._generate_samples(num_samples, t.width_in)
-
-                factor_log = t.factor_log
-                factor = 1 << factor_log
-                cic_order = t.order
-                M = t.M
-
-                # Build taps by convolving boxcar filter repeatedly.
-                taps0 = [1 for _ in range(factor*M)]
-                taps = [1]
-                for i in range(cic_order):
-                    taps = np.convolve(taps, taps0)
-
-                # Compute the expected result
-                cic_gain = (factor*M)**cic_order // factor
-                width_gain = 2**(t.width_out - t.width_in)
-                filtered_np = np.zeros(factor * num_samples)
-                filtered_np[::factor] = input_samples
-                filtered_np = np.convolve(filtered_np, taps)
-                filtered_np = np.round(filtered_np * width_gain / cic_gain)         # scale
-                filtered_np = filtered_np.astype(np.int32).tolist()  # convert to python list
-
-                # Simulate DUT
-                dut = CICInterpolator(M, cic_order, t.rates, t.width_in, t.width_out, always_ready=False)
-                filtered = self._filter(dut, input_samples, len(input_samples)//factor, oob={"factor":factor_log}, outfile=t.outfile)
-                
-                self.assertListEqual(filtered_np[:len(filtered)], filtered)
-
-
-if __name__ == "__main__":
-    unittest.main()

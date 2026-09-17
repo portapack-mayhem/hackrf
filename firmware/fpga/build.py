@@ -19,7 +19,7 @@ from top.ext_precision_tx   import Top as ext_precision_tx
 BLOCK_SIZE = 4096  # 4 KiB blocks
 OUTPUT_FILE = "praline_fpga.bin"
 
-def compress_blockwise(input_stream, output_stream):
+def compress_blockwise(f_in, f_out):
     # For every block...
     while block := f_in.read(BLOCK_SIZE):
 

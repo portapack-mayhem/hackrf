@@ -50,8 +50,8 @@ class SGPIOInterface(wiring.Component):
         # SGPIO clock and data lines.
         tx_clk_en      = Signal()
         rx_clk_en      = Signal()
-        data_to_host   = Signal(self.sample_width)
-        byte_to_host   = Signal(8)
+        data_to_host   = Signal(self.sample_width, reset_less=True)
+        byte_to_host   = Signal(8, reset_less=True)
         data_from_host = Signal(self.sample_width)
         byte_from_host = Signal(8)
 

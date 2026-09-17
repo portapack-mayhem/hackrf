@@ -50,7 +50,7 @@ class Top(Elaboratable):
 
         
         # Half-band filter taps.
-        taps_hb1 = [-2, 0, 5, 0, -10, 0,18, 0, -30, 0,53, 0,-101, 0, 323, 512, 323, 0,-101, 0, 53, 0, -30, 0,18, 0, -10, 0, 5, 0,-2]
+        taps_hb1 = [-2, 0, 5, 0, -10, 0, 18, 0, -30, 0, 53, 0, -101, 0, 323, 512, 323, 0, -101, 0, 53, 0, -30, 0, 18, 0, -10, 0, 5, 0, -2]
         taps_hb1 = [ tap/1024 for tap in taps_hb1 ]
 
         taps_hb2 = [3, 0, -16, 0, 77, 128, 77, 0, -16, 0, 3]
@@ -61,15 +61,17 @@ class Top(Elaboratable):
             "clkconv":          ClockConverter(IQSample(12), 8, "sync", dac_clk, always_ready=False),
 
             # Half-band interpolation stages (+ skid buffers for timing closure).
-            "hbfir1":           HalfBandInterpolatorMAC16(taps_hb1, data_shape=fixed.SQ(11),
+            "hbfir1":           HalfBandInterpolatorMAC16(taps_hb1, data_shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11),
                 overclock_rate=8, num_channels=2, always_ready=False, domain=dac_clk),
             "skid1":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(12), always_ready=False)),
-            "hbfir2":           HalfBandInterpolatorMAC16(taps_hb2, data_shape=fixed.SQ(11),
+            "hbfir2":           HalfBandInterpolatorMAC16(taps_hb2, data_shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11),
                 overclock_rate=4, num_channels=2, always_ready=False, domain=dac_clk),
             "skid2":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(12), always_ready=False)),
 
             # CIC interpolation stage.
-            "cic_comp":         DomainRenamer(dac_clk)(FIRFilter([-0.125, 0, 0.75, 0, -0.125], shape=fixed.SQ(11), shape_out=fixed.SQ(11), always_ready=False, num_channels=2)),
+            "cic_comp":         DomainRenamer(dac_clk)(FIRFilter([-0.125, 0, 0.75, 0, -0.125], 
+                shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11), always_ready=False, num_channels=2)),
+            "skid3":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(12), always_ready=False)),
             "cic_interpolator": CICInterpolator(2, 4, (4, 8, 16, 32), 12, 8, num_channels=2, 
                 always_ready=False, domain=dac_clk),
         }
@@ -91,9 +93,9 @@ class Top(Elaboratable):
         # Add control registers.
         ctrl         = spi_regs.add_register(0x01, init=0)
         tx_intrp     = Signal(3, init=4)
+        tx_intrp_cic = Signal.like(tx_chain["cic_interpolator"].factor, init=2)
         tx_intrp_new = Signal(3)
         tx_intrp_stb = Signal()
-        tx_intrp_cic = Signal.like(tx_chain["cic_interpolator"].factor)
         spi_regs.add_sfr(0x05, read=tx_intrp, write_signal=tx_intrp_new, write_strobe=tx_intrp_stb)
 
         m.d.comb += [

@@ -21,35 +21,34 @@ class QuarterShift(wiring.Component):
 
         index = Signal(range(4))
 
+        # Derive control signals from `index`.
+        swap  = index[0]
+        inv_q = index[0] ^ index[1]
+        inv_i = index[1]
+
+        # First stage: swap.
+        i = Mux(swap, self.input.p.q, self.input.p.i)
+        q = Mux(swap, self.input.p.i, self.input.p.q)
+
+        # Second stage: sign inversion.
+        i = Mux(inv_i, -i, i)
+        q = Mux(inv_q, -q, q)
+
         with m.If(~self.output.valid | self.output.ready):
             if not self.input.signature.always_ready:
                 m.d.comb += self.input.ready.eq(1)
             m.d.sync += self.output.valid.eq(self.input.valid)
             with m.If(self.input.valid):
+                # Output samples.
+                m.d.sync += self.output.p.i.eq(i)
+                m.d.sync += self.output.p.q.eq(q)
+
                 # Select direction of shift with the `up` signal.
                 with m.If(self.up):
                     m.d.sync += index.eq(index - 1)
                 with m.Else():
                     m.d.sync += index.eq(index + 1)
-
-                # Generate control signals derived from `index`.
-                swap  = index[0]
-                inv_q = index[0] ^ index[1]
-                inv_i = index[1]
-
-                # First stage: swap.
-                i = Mux(swap, self.input.p.q, self.input.p.i)
-                q = Mux(swap, self.input.p.i, self.input.p.q)
-
-                # Second stage: sign inversion.
-                i = Mux(inv_i, -i, i)
-                q = Mux(inv_q, -q, q)
-
-                with m.If(self.enable):
-                    m.d.sync += self.output.p.i.eq(i)
-                    m.d.sync += self.output.p.q.eq(q)
-                with m.Else():
-                    m.d.sync += self.output.p.i.eq(self.input.p.i)
-                    m.d.sync += self.output.p.q.eq(self.input.p.q)
+                with m.If(~self.enable):
+                    m.d.sync += index.eq(0)
 
         return m

@@ -9,7 +9,7 @@ from collections            import defaultdict
 from amaranth               import Module, Signal, signed
 from amaranth.lib           import wiring, stream, data
 from amaranth.lib.wiring    import In, Out
-from amaranth.utils         import bits_for
+from amaranth.utils         import ceil_log2
 
 
 class ShiftAddMCM(wiring.Component):
@@ -24,61 +24,79 @@ class ShiftAddMCM(wiring.Component):
             "output": Out(stream.Signature(
                 data.ArrayLayout(
                     data.StructLayout({
-                        f"{i}": signed(width + bits_for(abs(term))) for i, term in enumerate(terms)
+                        f"{i}": signed(1 + ceil_log2(2**(self.width-1) * abs(term))) for i, term in enumerate(terms)
                     }), num_channels), always_ready=always_ready)),
         })
+
+    @property
+    def delay(self):
+        return 1
 
     def elaborate(self, platform):
         m = Module()
 
-        # Get unique, odd terms.
-        terms = self.terms
-        unique_terms = defaultdict(list)
-        for i, term in enumerate(terms):
+        unique_terms = set()              # unique, odd terms.
+        term_outputs = defaultdict(list)  # outputs and shifts associated with each unique term.
+        term_digits  = {}                 # shifts and signs for CSD representation.
+
+        # Get unique terms and associate them to the outputs.
+        for i, term in enumerate(self.terms):
             if term == 0:
                 continue
-            term_odd, shift = make_odd(term)
-            unique_terms[term_odd] += [(i, shift)]
+            term_odd, out_shift = make_odd(term)
+            term_outputs[term_odd].append((i, out_shift))
+            unique_terms.add(term_odd)
+        
+        # Extract lists of CSD digits and their shifts.
+        for term in unique_terms:
+            digits = tuple((shift, digit) for shift, digit in enumerate(to_csd(term)) if digit != 0)
+            term_digits[term] = digits
 
-        # Negated inputs for CSD.
-        input_neg = Signal.like(self.input.p)
-        for c in range(self.num_channels):
-            m.d.comb += input_neg[c].eq(-self.input.p[c])
-
+        # Stream control.
+        advance = Signal()
         with m.If(~self.output.valid | self.output.ready):
             if not self.input.signature.always_ready:
                 m.d.comb += self.input.ready.eq(1)
             m.d.sync += self.output.valid.eq(self.input.valid)
+            m.d.comb += advance.eq(self.input.valid)
 
-        for term, outputs in unique_terms.items():
+        # Compute multiplies.
+        for c in range(self.num_channels):
+            n = self.input.p[c]
 
-            term_csd = to_csd(term)
+            def get_leaf_node(shift, digit):
+                base = n if digit > 0 else -n
+                return base if shift == 0 else (base << shift)
 
-            for c in range(self.num_channels):
-
-                n = self.input.p[c]
-                n_neg = input_neg[c]
-
+            for term in unique_terms:
                 result = None
-                for s, t in enumerate(term_csd):
-                    if t == 0:
-                        continue
-                    n_base = n if t == 1 else n_neg
-                    shifted_n = n_base if s == 0 else (n_base << s)
-                    if result is None:
-                        result = shifted_n
-                    else:
-                        result += shifted_n
 
-                # A single register can feed multiple outputs.
-                result_q = Signal(signed(self.width+bits_for(abs(term))), name=f"mul_{term}_{c}")
-                with m.If(self.input.ready & self.input.valid):
+                nodes = [ get_leaf_node(*digit_key) for digit_key in term_digits[term] ]
+                result = balanced_sum(nodes)
+
+                if result is None:
+                    result = 0
+
+                shape = signed(1 + ceil_log2(2**(self.width-1) * abs(term)))
+                result_q = Signal(shape, name=f"mul_{term}_{c}")
+                with m.If(advance):
                     m.d.sync += result_q.eq(result)
 
-                for out_index, shift in outputs:
-                    m.d.comb += self.output.p[c][f"{out_index}"].eq(result_q if shift == 0 else (result_q << shift))
+                for index, shift in term_outputs[term]:
+                    m.d.comb += self.output.p[c][f"{index}"][shift:].eq(result_q)
 
         return m
+
+
+def balanced_sum(nodes):
+    if len(nodes) == 0:
+        return 0
+    while len(nodes) > 1:
+        nodes = [
+            nodes[i] + nodes[i + 1] if i + 1 < len(nodes) else nodes[i]
+            for i in range(0, len(nodes), 2)
+        ]
+    return nodes[0]
 
 
 def make_odd(n):
@@ -92,31 +110,6 @@ def make_odd(n):
         shift += 1
     
     return n, shift
-
-
-def multiply(n, k):
-    if k == 0:
-        return 0
-
-    csd_k = to_csd(k)
-
-    result = None
-    for i, c in enumerate(csd_k):
-        if c == 0:
-            continue
-        shifted_n = n if i == 0 else (n << i)
-        if result is None:
-            if c == 1:
-                result = shifted_n
-            elif c == -1:
-                result = -shifted_n
-        else:
-            if c == 1:
-                result += shifted_n
-            elif c == -1:
-                result -= shifted_n
-    
-    return result[:bits_for(k-1)+len(n)].as_signed()
 
 
 def to_csd(n):

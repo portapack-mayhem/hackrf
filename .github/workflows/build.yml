@@ -284,6 +284,11 @@ jobs:
           mingw-w64-ucrt-x86_64-dfu-util
           mingw-w64-ucrt-x86_64-python-yaml
 
+    - name: Downgrade ARM linker (Windows, temporary)
+      if: matrix.os == 'windows'
+      shell: msys2 {0}
+      run: pacman -U --noconfirm https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-arm-none-eabi-binutils-2.46.1-1-any.pkg.tar.zst
+
     - name: Build with MSYS (Windows)
       if: matrix.os == 'windows'
       shell: msys2 {0}

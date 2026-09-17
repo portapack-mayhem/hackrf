@@ -61,7 +61,7 @@ class Top(Elaboratable):
 
         # NCO and mixer.
         m.submodules.nco = nco = NCO(phase_width=16, output_width=10, domain=adc_clk)
-        mixer = DomainRenamer(adc_clk)(ComplexMultiplier(IQSample(8), IQSample(10), IQSample(8), always_ready=True))
+        mixer = ComplexMultiplier(IQSample(8), IQSample(10), IQSample(8), always_ready=True, domain=adc_clk)
         mixer.input = mixer.a
         mixer.output = mixer.c
         m.d.comb += [
@@ -77,11 +77,11 @@ class Top(Elaboratable):
 
             # CIC mandatory first stage with compensator.
             "cic":          CICDecimator(2, 4, (4,8,16,32), width_in=8, width_out=12, num_channels=2, always_ready=True, domain=adc_clk),
-            "cic_comp":     DomainRenamer(adc_clk)(FIRFilter([-0.125, 0, 0.75, 0, -0.125], shape=fixed.SQ(11), shape_out=fixed.SQ(11), always_ready=True, num_channels=2)),
+            "cic_comp":     DomainRenamer(adc_clk)(FIRFilter([-0.125, 0, 0.75, 0, -0.125], shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11), always_ready=True, num_channels=2)),
 
             # Final half-band decimator stages.
-            "hbfir1":       HalfBandDecimatorMAC16(taps_hb1, data_shape=fixed.SQ(11), overclock_rate=4, always_ready=True, domain=adc_clk),
-            "hbfir2":       HalfBandDecimatorMAC16(taps_hb2, data_shape=fixed.SQ(11), overclock_rate=8, always_ready=True, domain=adc_clk),
+            "hbfir1":       HalfBandDecimatorMAC16(taps_hb1, data_shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11), overclock_rate=4, always_ready=True, domain=adc_clk),
+            "hbfir2":       HalfBandDecimatorMAC16(taps_hb2, data_shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11), overclock_rate=8, always_ready=True, domain=adc_clk),
 
             # Clock domain conversion.
             "clkconv":      ClockConverter(IQSample(12), 8, adc_clk, "sync", always_ready=True),
@@ -103,9 +103,9 @@ class Top(Elaboratable):
         # Add control registers.
         ctrl         = spi_regs.add_register(0x01, init=0)
         rx_decim     = Signal(3, init=4)
+        rx_decim_cic = Signal.like(rx_chain["cic"].factor, init=2)
         rx_decim_new = Signal(3)
         rx_decim_stb = Signal()
-        rx_decim_cic = Signal.like(rx_chain["cic"].factor)
         spi_regs.add_sfr(0x02, read=rx_decim, write_signal=rx_decim_new, write_strobe=rx_decim_stb)
         rx_nco       = spi_regs.add_register(0x03, init=0)
 

@@ -52,7 +52,8 @@ class Top(Elaboratable):
         taps5 = [ tap/32 for tap in taps5 ]
 
         common_rx_filter_opts = dict(
-            data_shape=fixed.SQ(7),
+            data_shape=fixed.SQ(1,7),
+            shape_out=fixed.SQ(1,7),
             always_ready=True,
             domain=adc_clk,
         )
@@ -87,17 +88,15 @@ class Top(Elaboratable):
             "clkconv":          ClockConverter(IQSample(8), 8, "sync", dac_clk, always_ready=False), 
 
             # Half-band interpolation stages (+ skid buffers for timing closure).
-            "hbfir1":           HalfBandInterpolator(taps, data_shape=fixed.SQ(7), 
-                num_channels=2, always_ready=False, domain=dac_clk),
+            "hbfir1":           HalfBandInterpolator(taps, data_shape=fixed.SQ(1,7), shape_out=fixed.SQ(1,7),
+                always_ready=False, domain=dac_clk),
             "skid2":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(8), always_ready=False)),
-            "hbfir2":           HalfBandInterpolator(taps2, data_shape=fixed.SQ(7), 
-                num_channels=2, always_ready=False, domain=dac_clk),
-            "skid3":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(8), always_ready=False)),
+            "hbfir2":           HalfBandInterpolator(taps2, data_shape=fixed.SQ(1,7), shape_out=fixed.SQ(1,7),
+                always_ready=False, domain=dac_clk),
 
             # CIC interpolation stage.
             "cic_interpolator": CICInterpolator(1, 3, (1, 2, 4, 8), 8, 8, num_channels=2, 
                 always_ready=False, domain=dac_clk),
-            "skid4":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(8), always_ready=False)),
         }
         for k,v in tx_chain.items():
             m.submodules[f"tx_{k}"] = v
@@ -141,13 +140,18 @@ class Top(Elaboratable):
             rx_chain["dc_block"].enable         .eq(ctrl[0]),
             rx_chain["quarter_shift"].enable    .eq(rx_pstep[-2]),
             rx_chain["quarter_shift"].up        .eq(rx_pstep[-1]),
+        ]
 
+        # RX decimation rate.  
+        rx_enables = Signal(5)
+        m.d.sync += rx_enables.eq((1 << rx_decim) - 1)  # binary to unary conversion
+        m.d.comb += [
             # RX decimation rate.
-            rx_chain["hbfir5"].enable           .eq(rx_decim > 4),
-            rx_chain["hbfir4"].enable           .eq(rx_decim > 3),
-            rx_chain["hbfir3"].enable           .eq(rx_decim > 2),
-            rx_chain["hbfir2"].enable           .eq(rx_decim > 1),
-            rx_chain["hbfir1"].enable           .eq(rx_decim > 0),
+            rx_chain["hbfir5"].enable           .eq(rx_enables[4]),
+            rx_chain["hbfir4"].enable           .eq(rx_enables[3]),
+            rx_chain["hbfir3"].enable           .eq(rx_enables[2]),
+            rx_chain["hbfir2"].enable           .eq(rx_enables[1]),
+            rx_chain["hbfir1"].enable           .eq(rx_enables[0]),
         ]
 
         # TX interpolation rate.

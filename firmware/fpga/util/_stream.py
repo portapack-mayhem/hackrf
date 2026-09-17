@@ -28,12 +28,17 @@ class StreamSkidBuffer(wiring.Component):
         # where the data from the producer is stored in r_payload.
         # Read https://www.itdev.co.uk/blog/pipelining-axi-buses-registered-ready-signals
 
+        p_payload   = Signal.like(self.input.payload, reset_less=True)
+        p_valid     = Signal()
         r_payload   = Signal.like(self.input.payload, reset_less=True)
         r_valid     = Signal()
 
         with m.If(self.input.ready):
-            m.d.sync += r_valid.eq(self.input.valid)
-            m.d.sync += r_payload.eq(self.input.payload)
+            m.d.sync += p_valid.eq(self.input.valid)
+            m.d.sync += p_payload.eq(self.input.payload)
+            with m.If(~self.output.ready):
+                m.d.sync += r_valid.eq(p_valid)
+                m.d.sync += r_payload.eq(p_payload)
 
         # r_valid can only be asserted when there is incoming data but the consumer is not ready.
         with m.If(self.output.ready):
@@ -41,8 +46,8 @@ class StreamSkidBuffer(wiring.Component):
 
         if not self.input.signature.always_ready:
             m.d.comb += self.input.ready.eq(~r_valid)
-        m.d.comb += self.output.valid.eq(self.input.valid | r_valid)
-        m.d.comb += self.output.p.eq(Mux(r_valid, r_payload, self.input.p))
+        m.d.comb += self.output.valid.eq(p_valid | r_valid)
+        m.d.comb += self.output.p.eq(Mux(r_valid, r_payload, p_payload))
 
         return m
 
