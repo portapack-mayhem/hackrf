@@ -254,3 +254,23 @@ void pins_setup(void)
 	/* Configure external clock in */
 	scu_pinmux(scu->PINMUX_GP_CLKIN, SCU_CLK_IN | SCU_CONF_FUNCTION1);
 }
+
+void pins_vreg(void)
+{
+	// TPS62410 PWM mode: output, high level (Praline: P4_9, otherwise: P6_11)
+	// Created by Pezsma, to fix issue 3438.
+#ifdef IS_PRALINE
+	if (IS_PRALINE) {
+		scu_pinmux(P4_9, SCU_GPIO_NOPULL | SCU_CONF_FUNCTION4); // GPIO5[13]
+		gpio_set(&GPIO5_13);
+		gpio_output(&GPIO5_13);
+	}
+#endif
+#ifdef IS_NOT_PRALINE
+	if (IS_NOT_PRALINE) {
+		scu_pinmux(P6_11, SCU_GPIO_NOPULL | SCU_CONF_FUNCTION0); // GPIO3[7]
+		gpio_set(&GPIO3_7);
+		gpio_output(&GPIO3_7);
+	}
+#endif
+}

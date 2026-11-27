@@ -447,6 +447,9 @@ int main(void)
 	mixer_bus_setup(&mixer);
 	sgpio_configure_pin_functions(&sgpio_config);
 	rf_path_pin_setup(&rf_path);
+
+	pins_vreg();
+
 #ifdef IS_PRALINE
 	if (IS_PRALINE) {
 		enable_3v3aux_power();
