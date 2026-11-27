@@ -279,14 +279,10 @@ static uint8_t fpga_lz4_in_buf[4096];
 static uint8_t fpga_lz4_out_buf[4096];
 
 void fpga_loader_setup(void)
-{
-	w25q80bv_setup(&spi_flash);
-}
+{ w25q80bv_setup(&spi_flash); }
 
 void fpga_loader_read(uint32_t addr, uint32_t size, uint8_t* buf)
-{
-	w25q80bv_read(&spi_flash, addr, size, buf);
-}
+{ w25q80bv_read(&spi_flash, addr, size, buf); }
 
 struct fpga_loader_t fpga_loader = {
 	.start_addr = (uint32_t) &_binary_fpga_bin_start,
@@ -447,6 +443,9 @@ int main(void)
 	mixer_bus_setup(&mixer);
 	sgpio_configure_pin_functions(&sgpio_config);
 	rf_path_pin_setup(&rf_path);
+
+	pins_vreg();
+
 #ifdef IS_PRALINE
 	if (IS_PRALINE) {
 		enable_3v3aux_power();

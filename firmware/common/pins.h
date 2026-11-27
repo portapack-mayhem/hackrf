@@ -29,6 +29,7 @@ extern "C" {
 
 void pins_shutdown(void);
 void pins_setup(void);
+void pins_vreg(void);
 
 #ifdef __cplusplus
 }
